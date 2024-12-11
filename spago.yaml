@@ -1,0 +1,17 @@
+package:
+  name: extensible-ast
+  dependencies:
+    - console
+    - effect
+    - fixed-points
+    - leibniz
+    - ordered-collections
+    - parsing
+    - prelude
+  test:
+    main: Test.Main
+    dependencies: []
+workspace:
+  packageSet:
+    registry: 61.2.0
+  extraPackages: {}
