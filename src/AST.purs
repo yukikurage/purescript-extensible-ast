@@ -53,33 +53,23 @@ instance (HFunctor f, HFunctor g) => HFunctor (CoproductH f g) where
 -- 現在の分岐を表す Phantom Type
 data ExpressionP
 data OperatorP
-data LiteralP
-data IdentifierP
 data ProgramP
+
+data Op = Plus | Mul
 
 data ASTF r p
   =
-    -- Literal
-    IntLitF Int (p ~ LiteralP)
-
-  -- Operator
-  | PlusF (p ~ OperatorP)
-  | MulF (p ~ OperatorP)
-
-  -- Expression
-  | ExpLitF (r LiteralP) (p ~ ExpressionP)
-  | ExpOpF (r OperatorP) (r ExpressionP) (r ExpressionP) (p ~ ExpressionP)
+    -- Expression
+    ExpLitF Int (p ~ ExpressionP)
+  | ExpOpF Op (r ExpressionP) (r ExpressionP) (p ~ ExpressionP)
   -- Program
   | EmptyF (p ~ ProgramP)
   | SeqF (r ExpressionP) (r ProgramP) (p ~ ProgramP)
 
 instance HFunctor ASTF where
   hmap f = case _ of
-    IntLitF n e -> IntLitF n e
-    PlusF e -> PlusF e
-    MulF e -> MulF e
-    ExpLitF lit e -> ExpLitF (f lit) e
-    ExpOpF op exp1 exp2 e -> ExpOpF (f op) (f exp1) (f exp2) e
+    ExpLitF lit e -> ExpLitF lit e
+    ExpOpF op exp1 exp2 e -> ExpOpF op (f exp1) (f exp2) e
     EmptyF e -> EmptyF e
     SeqF exp prog e -> SeqF (f exp) (f prog) e
 
@@ -121,22 +111,9 @@ withMetaErr p = do
   astf <- p
   pure $ InH $ ProductH (InRH astf) (Metadata pos)
 
-parseLiteral :: Parser String (AST' LiteralP)
-parseLiteral = withMeta do
-  n <- tokenParser.integer
-  pure $ IntLitF n identity
-
-parseOperator :: Parser String (AST' OperatorP)
-parseOperator = withMeta do
-  op <- tokenParser.operator
-  case op of
-    "+" -> pure $ PlusF identity
-    "*" -> pure $ MulF identity
-    unOp -> fail $ "Unknown operator: " <> unOp
-
 parseExpLit :: Parser String (AST' ExpressionP)
 parseExpLit = withMeta do
-  lit <- parseLiteral
+  lit <- tokenParser.integer
   pure $ ExpLitF lit identity
 
 parseExpression :: Parser String (AST' ExpressionP)
@@ -144,7 +121,12 @@ parseExpression = do
   exp <- parseExpLit <|> tokenParser.parens (defer $ \_ -> parseExpression)
   alt
     ( withMeta do
-        op <- parseOperator
+        op <- do
+          opStr <- tokenParser.operator
+          case opStr of
+            "+" -> pure Plus
+            "*" -> pure Mul
+            unOp -> fail $ "Unknown operator: " <> unOp
         exp' <- parseExpression
         pure $ ExpOpF op exp exp' identity
     )
@@ -185,24 +167,22 @@ parseProgramWithErr = withMeta do
     do
       pure $ EmptyF identity
 
-data Op = Plus | Mul
 data Semantics p
-  = IntLitS Int (p ~ LiteralP)
-  | OpS Op (p ~ OperatorP)
-  | ExpS (String \/ Int) (p ~ ExpressionP)
+  = ExpS (String \/ Int) (p ~ ExpressionP)
   | ProgramS (List (String \/ Int)) (p ~ ProgramP)
 
 programHandler :: forall p. ((ASTF :+: ParseErrorF) :*: MetadataF) Semantics p -> Semantics p
 programHandler = case _ of
   ProductH astOrErr (Metadata pos) -> case astOrErr of
     InLH ast -> case ast of
-      IntLitF n e -> IntLitS n e
-      PlusF e -> OpS Plus e
-      MulF e -> OpS Mul e
-      ExpLitF lit e -> ExpS (Right $ unIntLit lit) e
-      ExpOpF op exp1 exp2 e -> case unOperator op of
-        Plus -> ExpS (lift2 (+) (unExp exp1) (unExp exp2)) e
-        Mul -> ExpS (lift2 (*) (unExp exp1) (unExp exp2)) e
+      ExpLitF lit e -> ExpS (Right lit) e
+      ExpOpF op exp1 exp2 e ->
+        let
+          func = case op of
+            Plus -> (+)
+            Mul -> (*)
+        in
+          ExpS (lift2 func (unExp exp1) (unExp exp2)) e
       EmptyF e -> ProgramS mempty e
       SeqF exp prog e ->
         ( ProgramS $ unExp exp : unProgram prog
@@ -216,30 +196,17 @@ interpretProgram ast' = foldFix programHandler ast'
 runProgram :: AST' ProgramP -> List (String \/ Int)
 runProgram ast = unProgram (interpretProgram ast)
 
-unIntLit :: Semantics LiteralP -> Int
-unIntLit = case _ of
-  IntLitS n _ -> n
-  OpS _ e -> refute e
-  ExpS _ e -> refute e
-  ProgramS _ e -> refute e
-
 unExp :: Semantics ExpressionP -> String \/ Int
 unExp = case _ of
-  IntLitS _ e -> refute e
-  OpS _ e -> refute e
   ExpS f _ -> f
   ProgramS _ e -> refute e
 
 unOperator :: Semantics OperatorP -> Op
 unOperator = case _ of
-  IntLitS _ e -> refute e
-  OpS op _ -> op
   ExpS _ e -> refute e
   ProgramS _ e -> refute e
 
 unProgram :: Semantics ProgramP -> List (String \/ Int)
 unProgram = case _ of
-  IntLitS _ e -> refute e
-  OpS _ e -> refute e
   ExpS _ e -> refute e
   ProgramS f _ -> f
