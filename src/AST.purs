@@ -15,18 +15,6 @@ import Parsing.Language (haskellStyle)
 import Parsing.String (anyTill)
 import Parsing.Token (TokenParser, makeTokenParser)
 
-{-
-
-Identifier ::= "a" | "b" | "c" | ...
-Literal ::= Int
-Operator ::= "+"
-Expression ::= Identifier | Literal | Expression Operator Expression
-Statement ::= "let" Identifier "=" Expression | Expression
-
-Program ::= "" | Statement ";" Program
-
--}
-
 class HFunctor :: forall k1 k2. ((k1 -> Type) -> k2 -> Type) -> Constraint
 class HFunctor f where
   hmap :: forall g h p. (forall a. g a -> h a) -> f g p -> f h p
